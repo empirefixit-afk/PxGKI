@@ -158,27 +158,38 @@ jobs:
          echo -e "\e[33m[Done]\e[0m" Add KPM configuration to kernel
          echo -e "\e[33m[Done]\e[0m" Enable KPM feature
 
-      - name: Patch SukiSU build break (policydb -> db)
+      - name: Patch SukiSU build break (policydb -> pol)
         run: |
          cd Buildkernel
          F=./common/drivers/kernelsu/selinux/rules.c
          if [ ! -f "$F" ]; then echo "::error::$F missing -- SukiSU layout changed"; exit 1; fi
-         # SukiSU's `builtin` tip uses the bare identifier `policydb` where the local variable
-         # is `db` (assigned just above from &pol->policydb). Clang rejects it:
-         #   rules.c:194: error: must use 'struct' tag to refer to type 'policydb'
-         # Upstream bug, not a config problem. Fix it, and accept the case where upstream
-         # has already corrected it so this step does not break on a later pull.
+         # SukiSU's `builtin` tip writes `policydb->latest_granting` where the identifier must be
+         # `pol`. Two independent proofs that `pol` is correct, both read from this same file:
+         #   1. `latest_granting` is a member of `struct selinux_policy`
+         #      (linux v6.1 security/selinux/ss/services.h:29), and `pol` is declared
+         #      `struct selinux_policy *pol, *old_pol;` at line 154. `db` is `struct policydb *`,
+         #      which has no such member -- so writing through `db` cannot compile either.
+         #   2. line 619 of the same file performs the identical operation, correctly:
+         #         pol->latest_granting = old_pol->latest_granting + 1;
+         #   It is the twin of line 194 in the parallel function.
+         # Upstream bug, not a config problem. Fix it, and accept the case where upstream has
+         # already corrected it so this step does not break on a later pull.
          if grep -qE '^[[:space:]]*policydb->latest_granting' "$F"; then
            # Portable substitution: no capture group (BSD sed rejects it) and no `sed -i`
            # (BSD needs an argument, GNU does not). Keeps the original indentation.
-           sed -E 's/policydb->latest_granting/db->latest_granting/' "$F" > "$F.tmp" && mv "$F.tmp" "$F"
-           echo "[fixed] rules.c: bare policydb -> db"
+           sed -E 's/policydb->latest_granting/pol->latest_granting/' "$F" > "$F.tmp" && mv "$F.tmp" "$F"
+           echo "[fixed] rules.c: policydb -> pol"
          else
            echo "[skip] no bare policydb->latest_granting; upstream already correct"
          fi
          if grep -qE '^[[:space:]]*policydb->' "$F"; then
            echo "::error::a bare policydb-> reference still remains in rules.c"; exit 1
          fi
+         # Prove the corrected form is present, so a silent no-op cannot pass as a fix.
+         if ! grep -qE '^[[:space:]]*pol->latest_granting[[:space:]]*=' "$F"; then
+           echo "::error::expected 'pol->latest_granting =' in rules.c and did not find it"; exit 1
+         fi
+         echo "[ok] rules.c writes latest_granting through pol"
 
       - name: Set up kernel suffix
         run: |
