@@ -139,15 +139,24 @@ jobs:
          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> ./common/arch/arm64/configs/gki_defconfig
          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./common/arch/arm64/configs/gki_defconfig
          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
+         # Previously unset even though the builtin driver defines them: turning on every
+         # capability the Kconfig offers instead of the subset the upstream template shipped.
+         echo "CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER=y" >> ./common/arch/arm64/configs/gki_defconfig
+         echo "CONFIG_KSU_FEATURE_ADBROOT=y" >> ./common/arch/arm64/configs/gki_defconfig
+         # CONFIG_KSU_DEBUG deliberately left OFF: it is extra kernel logging, which is both a
+         # detection surface for hiding and a performance cost. The other 14 options are on.
          # tmpfs
          echo "CONFIG_TMPFS_XATTR=y" >> ./common/arch/arm64/configs/gki_defconfig
          echo "CONFIG_TMPFS_POSIX_ACL=y" >> ./common/arch/arm64/configs/gki_defconfig
          sed -i 's/check_defconfig//' ./common/build.config.gki
-         # fail loudly if any susfs symbol was silently dropped by Kconfig
-         for c in $(grep -o '^CONFIG_KSU_SUSFS[A-Z_]*' ./common/arch/arm64/configs/gki_defconfig); do
+         # fail loudly if ANY requested KSU symbol was silently dropped by Kconfig -- a dropped
+         # SUSFS symbol builds green and ships a kernel that hides nothing, which is the failure
+         # this guard exists to catch.
+         for c in $(grep -oE '^CONFIG_(KSU|KPM)[A-Z_]*' ./common/arch/arm64/configs/gki_defconfig | sort -u); do
            grep -qE "^config[[:space:]]+${c#CONFIG_}[[:space:]]*$" ./KernelSU/kernel/Kconfig \
              || { echo "::error::$c is not defined by this SukiSU driver"; exit 1; }
          done
+         echo "Requested KSU/SUSFS/KPM config count: $(grep -cE '^CONFIG_(KSU|KPM)' ./common/arch/arm64/configs/gki_defconfig)"
          echo -e "\e[33m[Done]\e[0m" Add configuration to kernel
       
       - name: Add KPM configuration to kernel
