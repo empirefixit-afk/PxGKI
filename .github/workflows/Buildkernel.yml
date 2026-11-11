@@ -158,6 +158,28 @@ jobs:
          echo -e "\e[33m[Done]\e[0m" Add KPM configuration to kernel
          echo -e "\e[33m[Done]\e[0m" Enable KPM feature
 
+      - name: Patch SukiSU build break (policydb -> db)
+        run: |
+         cd Buildkernel
+         F=./common/drivers/kernelsu/selinux/rules.c
+         if [ ! -f "$F" ]; then echo "::error::$F missing -- SukiSU layout changed"; exit 1; fi
+         # SukiSU's `builtin` tip uses the bare identifier `policydb` where the local variable
+         # is `db` (assigned just above from &pol->policydb). Clang rejects it:
+         #   rules.c:194: error: must use 'struct' tag to refer to type 'policydb'
+         # Upstream bug, not a config problem. Fix it, and accept the case where upstream
+         # has already corrected it so this step does not break on a later pull.
+         if grep -qE '^[[:space:]]*policydb->latest_granting' "$F"; then
+           # Portable substitution: no capture group (BSD sed rejects it) and no `sed -i`
+           # (BSD needs an argument, GNU does not). Keeps the original indentation.
+           sed -E 's/policydb->latest_granting/db->latest_granting/' "$F" > "$F.tmp" && mv "$F.tmp" "$F"
+           echo "[fixed] rules.c: bare policydb -> db"
+         else
+           echo "[skip] no bare policydb->latest_granting; upstream already correct"
+         fi
+         if grep -qE '^[[:space:]]*policydb->' "$F"; then
+           echo "::error::a bare policydb-> reference still remains in rules.c"; exit 1
+         fi
+
       - name: Set up kernel suffix
         run: |
          cd Buildkernel
